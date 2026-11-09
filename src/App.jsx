@@ -203,6 +203,9 @@ function TransactionRow({ tx, editable, onEdit, onDelete, compact = false }) {
         <div className="transaction-name">{tx.product}</div>
         <div className="transaction-meta">
           {number(tx.quantity)} × {money(tx.unitPrice)} <span className="dot-separator">·</span> {formatTime(tx.createdAt)}
+          <span className={`payment-chip ${tx.paymentStatus === 'debt' ? 'payment-debt' : 'payment-paid'}`}>{tx.paymentStatus === 'debt' ? 'Utang' : 'Lunas'}</span>
+          {tx.paymentStatus === 'debt' && tx.customerName && <span className="tx-customer">· {tx.customerName}</span>}
+          {tx.note && <span className="tx-note">· {tx.note}</span>}
         </div>
       </div>
       <div className="transaction-right">
@@ -220,12 +223,12 @@ function TransactionRow({ tx, editable, onEdit, onDelete, compact = false }) {
 
 function App() {
   const [data, setData] = useState(() => loadData())
-  const [page, setPage] = useState('home')
+  const [page, setPage] = useState('sales')
   const [toast, setToast] = useState('')
   const [startDialog, setStartDialog] = useState(false)
   const [startForm, setStartForm] = useState({ date: localDateISO(), keeper: 'Saya', startAt: nowLocalInput() })
   const [txDialog, setTxDialog] = useState(null)
-  const [txForm, setTxForm] = useState({ product: '', quantity: '1', unitPrice: '' })
+  const [txForm, setTxForm] = useState({ product: '', quantity: '1', unitPrice: '', paymentStatus: 'paid', customerName: '', note: '' })
   const [confirmDialog, setConfirmDialog] = useState(null)
   const [selectedShiftId, setSelectedShiftId] = useState(null)
   const [correctionEnabled, setCorrectionEnabled] = useState(false)
@@ -260,6 +263,8 @@ function App() {
     return { revenue: acc.revenue + totals.revenue, items: acc.items + totals.items, count: acc.count + totals.count }
   }, { revenue: 0, items: 0, count: 0 })
   const activeTotals = shiftTotals(activeShift)
+  const activePaid = (activeShift?.transactions || []).filter((tx) => (tx.paymentStatus || 'paid') === 'paid').reduce((sum, tx) => sum + Number(tx.quantity) * Number(tx.unitPrice), 0)
+  const activeDebt = (activeShift?.transactions || []).filter((tx) => tx.paymentStatus === 'debt').reduce((sum, tx) => sum + Number(tx.quantity) * Number(tx.unitPrice), 0)
 
   const updateShift = (shiftId, updater) => {
     setData((current) => ({
@@ -318,18 +323,19 @@ function App() {
     const quantity = Number(txForm.quantity)
     const unitPrice = Number(txForm.unitPrice)
     if (!product) return notify('Nama produk wajib diisi.')
+    if (txForm.paymentStatus === 'debt' && !txForm.customerName.trim()) return notify('Nama pelanggan perlu diisi untuk transaksi utang.')
     if (!Number.isInteger(quantity) || quantity < 1 || txForm.unitPrice === '' || !Number.isFinite(unitPrice) || unitPrice < 0) {
       return notify('Periksa jumlah dan harga satuan.')
     }
     const timestamp = new Date().toISOString()
-    const transaction = { id: createId(), product, quantity, unitPrice, createdAt: timestamp, updatedAt: timestamp }
+    const transaction = { id: createId(), product, quantity, unitPrice, paymentStatus: txForm.paymentStatus || 'paid', customerName: txForm.paymentStatus === 'debt' ? txForm.customerName.trim() : '', note: txForm.note.trim(), createdAt: timestamp, updatedAt: timestamp }
     updateShift(activeShift.id, (current) => ({ ...current, transactions: [transaction, ...current.transactions] }))
-    setTxForm({ product: '', quantity: '1', unitPrice: '' })
+    setTxForm({ product: '', quantity: '1', unitPrice: '', paymentStatus: 'paid', customerName: '', note: '' })
     notify('Penjualan berhasil disimpan.')
   }
 
   const openEditTransaction = (shiftId, tx) => {
-    setTxForm({ product: tx.product, quantity: String(tx.quantity), unitPrice: String(tx.unitPrice) })
+    setTxForm({ product: tx.product, quantity: String(tx.quantity), unitPrice: String(tx.unitPrice), paymentStatus: tx.paymentStatus || 'paid', customerName: tx.customerName || '', note: tx.note || '' })
     setTxDialog({ mode: 'edit', shiftId, txId: tx.id })
   }
 
@@ -346,6 +352,10 @@ function App() {
       notify('Periksa jumlah dan harga satuan.')
       return
     }
+    if (txForm.paymentStatus === 'debt' && !txForm.customerName.trim()) {
+      notify('Nama pelanggan perlu diisi untuk transaksi utang.')
+      return
+    }
     const shift = data.shifts.find((item) => item.id === txDialog.shiftId)
     if (!shift) return
     if (shift.status === 'completed' && !correctionEnabled) {
@@ -359,17 +369,20 @@ function App() {
         product,
         quantity,
         unitPrice,
+        paymentStatus: txForm.paymentStatus || 'paid',
+        customerName: txForm.paymentStatus === 'debt' ? txForm.customerName.trim() : '',
+        note: txForm.note.trim(),
         createdAt: timestamp,
         updatedAt: timestamp,
       }
       updateShift(txDialog.shiftId, (current) => ({ ...current, transactions: [transaction, ...current.transactions] }))
-      setTxForm({ product: '', quantity: '1', unitPrice: '' })
+      setTxForm({ product: '', quantity: '1', unitPrice: '', paymentStatus: 'paid', customerName: '', note: '' })
       notify('Penjualan berhasil disimpan.')
     } else {
       updateShift(txDialog.shiftId, (current) => ({
         ...current,
         transactions: current.transactions.map((item) => item.id === txDialog.txId
-          ? { ...item, product, quantity, unitPrice, updatedAt: timestamp }
+          ? { ...item, product, quantity, unitPrice, paymentStatus: txForm.paymentStatus || 'paid', customerName: txForm.paymentStatus === 'debt' ? txForm.customerName.trim() : '', note: txForm.note.trim(), updatedAt: timestamp }
           : item),
       }))
       notify('Transaksi berhasil diperbarui.')
@@ -469,6 +482,9 @@ function App() {
     const totals = shiftTotals(shift)
     return { revenue: acc.revenue + totals.revenue, items: acc.items + totals.items, count: acc.count + totals.count }
   }, { revenue: 0, items: 0, count: 0 })
+  const reportTransactions = reportShifts.flatMap((shift) => shift.transactions)
+  const reportPaid = reportTransactions.filter((tx) => (tx.paymentStatus || 'paid') === 'paid').reduce((sum, tx) => sum + Number(tx.quantity) * Number(tx.unitPrice), 0)
+  const reportDebt = reportTransactions.filter((tx) => tx.paymentStatus === 'debt').reduce((sum, tx) => sum + Number(tx.quantity) * Number(tx.unitPrice), 0)
 
   const productSummary = useMemo(() => {
     const products = new Map()
@@ -500,10 +516,12 @@ function App() {
     reportShifts.forEach((shift, index) => {
       const totals = shiftTotals(shift)
       lines.push(`${index + 1}. ${formatDate(shift.date)} | ${formatTime(shift.startAt)} - ${shift.endAt ? formatTime(shift.endAt) : 'Masih aktif'} | ${shift.keeper}`)
-      shift.transactions.forEach((tx) => lines.push(`   • ${tx.product} — ${tx.quantity} × ${money(tx.unitPrice)} = ${money(Number(tx.quantity) * Number(tx.unitPrice))}`))
+      shift.transactions.forEach((tx) => lines.push(`   • ${tx.product} — ${tx.quantity} × ${money(tx.unitPrice)} = ${money(Number(tx.quantity) * Number(tx.unitPrice))} | ${(tx.paymentStatus || 'paid') === 'debt' ? `UTANG${tx.customerName ? ` (${tx.customerName})` : ''}` : 'LUNAS'}${tx.note ? ` | Catatan: ${tx.note}` : ''}`))
       lines.push(`   Subtotal shift: ${money(totals.revenue)} | ${totals.items} item | ${totals.count} transaksi`)
     })
-    lines.push('', `Total barang: ${number(reportTotals.items)} item`, `Total transaksi: ${number(reportTotals.count)}`, `TOTAL OMZET: ${money(reportTotals.revenue)}`, '', 'Catatan: Angka di atas merupakan omzet penjualan, bukan keuntungan bersih.')
+    const paidReport = reportShifts.flatMap((shift) => shift.transactions).filter((tx) => (tx.paymentStatus || 'paid') === 'paid').reduce((sum, tx) => sum + Number(tx.quantity) * Number(tx.unitPrice), 0)
+    const debtReport = reportShifts.flatMap((shift) => shift.transactions).filter((tx) => tx.paymentStatus === 'debt').reduce((sum, tx) => sum + Number(tx.quantity) * Number(tx.unitPrice), 0)
+    lines.push('', `Total barang: ${number(reportTotals.items)} item`, `Total transaksi: ${number(reportTotals.count)}`, `TOTAL OMZET: ${money(reportTotals.revenue)}`, `Uang diterima: ${money(paidReport)}`, `Belum dibayar / utang: ${money(debtReport)}`, '', 'Catatan: Omzet mencakup transaksi lunas dan utang; uang diterima hanya transaksi lunas. Omzet bukan keuntungan bersih.')
     return lines.join('\n')
   }
 
@@ -524,7 +542,7 @@ function App() {
   }
 
   const exportCSV = () => {
-    const rows = [['Tanggal', 'Penjaga', 'Status Shift', 'Waktu Mulai', 'Waktu Selesai', 'Produk', 'Jumlah', 'Harga Satuan', 'Subtotal', 'Waktu Transaksi']]
+    const rows = [['Tanggal', 'Penjaga', 'Status Shift', 'Waktu Mulai', 'Waktu Selesai', 'Produk', 'Jumlah', 'Harga Satuan', 'Subtotal', 'Status Pembayaran', 'Nama Pelanggan', 'Catatan', 'Waktu Transaksi']]
     reportShifts.forEach((shift) => shift.transactions.forEach((tx) => rows.push([
       shift.date,
       shift.keeper,
@@ -535,6 +553,9 @@ function App() {
       tx.quantity,
       tx.unitPrice,
       Number(tx.quantity) * Number(tx.unitPrice),
+      (tx.paymentStatus || 'paid') === 'debt' ? 'Utang' : 'Lunas',
+      tx.customerName || '',
+      tx.note || '',
       formatTime(tx.createdAt),
     ])))
     const csv = '\uFEFF' + rows.map((row) => row.map((cell) => `"${String(cell ?? '').replaceAll('"', '""')}"`).join(',')).join('\r\n')
@@ -542,7 +563,7 @@ function App() {
     const url = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
     anchor.href = url
-    anchor.download = `warungboim-laporan-${reportPeriod.start}-${reportPeriod.end}.csv`
+    anchor.download = `warungflow-laporan-${reportPeriod.start}-${reportPeriod.end}.csv`
     anchor.click()
     URL.revokeObjectURL(url)
     notify('File CSV berhasil dibuat.')
@@ -554,7 +575,7 @@ function App() {
     const url = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
     anchor.href = url
-    anchor.download = `warungboim-backup-${today}.json`
+    anchor.download = `warungflow-backup-${today}.json`
     anchor.click()
     URL.revokeObjectURL(url)
     notify('Backup data berhasil diunduh.')
@@ -635,106 +656,68 @@ function App() {
       <main className="main-content">
         {page === 'home' && (
           <>
-            <section className="welcome-row">
+            <section className="compact-welcome">
               <div>
-                <div className="eyebrow"><Sparkles size={13} /> PERSONAL WARUNG JOURNAL</div>
+                <div className="eyebrow"><Sparkles size={12} /> WARUNG BOIM · HARI INI</div>
                 <h1>{getTodayGreeting()}, <span>{data.profile.name || 'teman'}.</span></h1>
-                <p className="muted welcome-date"><CalendarDays size={15} /> {formatDate(today, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</p>
+                <p><CalendarDays size={14} /> {formatDate(today, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</p>
               </div>
-              <div className={`shift-status ${activeShift ? 'is-active' : ''}`}>
-                <span className="status-pulse" />
-                <div><small>STATUS PENCATATAN</small><strong>{activeShift ? 'Shift sedang berjalan' : 'Belum ada shift aktif'}</strong></div>
+              <span className={`shift-status compact-status ${activeShift ? 'is-active' : ''}`}>
+                <i className="status-pulse" /> {activeShift ? 'Jaga aktif' : 'Belum mulai'}
+              </span>
+            </section>
+
+            <section className="compact-revenue-card">
+              <div className="compact-revenue-top">
+                <span>OMZET HARI INI</span>
+                <span><Wallet size={15} /> {number(todayTotals.count)} transaksi</span>
+              </div>
+              <strong>{money(todayTotals.revenue)}</strong>
+              <div className="compact-revenue-bottom">
+                <span>{number(todayTotals.items)} barang terjual</span>
+                {activeShift
+                  ? <Button variant="primary" onClick={() => navTo('sales')}>Lanjut input <ArrowRight size={15} /></Button>
+                  : <Button variant="primary" onClick={openStartDialog}><Plus size={15} /> Mulai jaga</Button>}
               </div>
             </section>
 
-            <section className="hero-panel">
-              <div className="hero-copy">
-                <div className="hero-kicker"><span className="hero-kicker-line" /> CATAT. PANTAU. REKAP.</div>
-                <h2>{activeShift ? 'Jaga warung, catat setiap penjualan.' : 'Semua penjualan tercatat rapi.'}</h2>
-                <p>{activeShift ? `Shift dimulai pukul ${formatTime(activeShift.startAt)}. Catat produk yang terjual agar rekap penjagaanmu selalu akurat.` : 'Mulai sesi penjagaanmu dan catat produk yang terjual dengan cepat. Semua data tersimpan otomatis di perangkat ini.'}</p>
-                {activeShift ? (
-                  <Button variant="primary" onClick={() => navTo('sales')}>Lanjutkan pencatatan <ArrowRight size={16} /></Button>
-                ) : (
-                  <Button variant="primary" onClick={openStartDialog}><Plus size={17} /> Mulai jaga warung</Button>
-                )}
+            <section className="compact-shift-strip">
+              <div className="compact-shift-icon"><Clock3 size={17} /></div>
+              <div className="compact-shift-copy">
+                <strong>{activeShift ? 'Shift sedang berjalan' : lastShift ? 'Penjagaan terakhir' : 'Belum ada catatan penjagaan'}</strong>
+                <span>{activeShift
+                  ? `${formatTime(activeShift.startAt)} · ${activeShift.keeper} · ${number(activeTotals.count)} transaksi`
+                  : lastShift
+                    ? `${formatDate(lastShift.date)} · ${formatTime(lastShift.startAt)}${lastShift.endAt ? `–${formatTime(lastShift.endAt)}` : ''}`
+                    : 'Mulai shift untuk mencatat penjualan.'}</span>
               </div>
-              <div className="hero-visual" aria-hidden="true">
-                <div className="hero-orbit orbit-one" /><div className="hero-orbit orbit-two" />
-                <div className="hero-receipt">
-                  <div className="receipt-top"><span className="receipt-star">✦</span><span>WARUNG RECEIPT</span><MoreHorizontal size={17} /></div>
-                  <div className="receipt-line wide" /><div className="receipt-line medium" />
-                  <div className="receipt-item"><span>Indomie Goreng</span><b>Rp7.000</b></div>
-                  <div className="receipt-item"><span>Air Mineral</span><b>Rp8.000</b></div>
-                  <div className="receipt-item"><span>Kopi Sachet</span><b>Rp4.000</b></div>
-                  <div className="receipt-rule" />
-                  <div className="receipt-total"><span>TOTAL</span><b>Rp19.000</b></div>
-                  <div className="receipt-stamp"><Check size={16} /> RECORDED</div>
+              {activeShift && <span className="live-badge"><span /> LIVE</span>}
+            </section>
+
+            <section className="compact-activity surface-panel">
+              <SectionHeading eyebrow="CATATAN TERBARU" title="Penjualan terakhir" action={<button className="text-action" onClick={() => navTo('history')}>Riwayat <ChevronRight size={14} /></button>} />
+              {recentTransactions.length ? (
+                <div className="transaction-list compact-list">
+                  {recentTransactions.slice(0, 4).map((tx) => (
+                    <button className="recent-row" key={tx.id} onClick={() => openShiftDetail(tx.shiftId)}>
+                      <span className="recent-icon"><ShoppingBag size={15} /></span>
+                      <span className="recent-copy"><b>{tx.product}</b><small>{formatDate(tx.shiftDate, { day: 'numeric', month: 'short' })} · {number(tx.quantity)} item</small></span>
+                      <strong>{money(Number(tx.quantity) * Number(tx.unitPrice))}</strong>
+                    </button>
+                  ))}
                 </div>
-                <div className="hero-float float-top"><TrendingUp size={16} /><span>Penjualan tercatat</span></div>
-                <div className="hero-float float-bottom"><ShieldCheck size={16} /><span>Auto saved</span></div>
-              </div>
+              ) : (
+                <EmptyState icon={ShoppingBag} title="Belum ada penjualan" description="Transaksi yang kamu catat akan tampil di sini." action={<Button variant="outline" onClick={() => navTo('sales')}>Buka input penjualan</Button>} />
+              )}
             </section>
-
-            <section className="stats-grid">
-              <StatCard label="Omzet hari ini" value={money(todayTotals.revenue)} hint="Total dari semua shift hari ini" icon={Wallet} accent />
-              <StatCard label="Barang terjual" value={`${number(todayTotals.items)} item`} hint="Akumulasi kuantitas produk" icon={Package} />
-              <StatCard label="Transaksi" value={number(todayTotals.count)} hint="Catatan produk yang tersimpan" icon={Activity} />
-            </section>
-
-            <div className="home-lower-grid">
-              <section className="surface-panel shift-overview">
-                <SectionHeading eyebrow="CURRENT SESSION" title="Ringkasan shift" action={activeShift && <span className="live-badge"><span /> LIVE</span>} />
-                {activeShift ? (
-                  <>
-                    <div className="active-shift-card">
-                      <div className="active-shift-date"><CalendarDays size={16} /> {formatDate(activeShift.date)}</div>
-                      <div className="active-shift-time"><Clock3 size={15} /> Mulai {formatTime(activeShift.startAt)} <span>·</span> {activeShift.keeper}</div>
-                      <div className="active-shift-total">{money(activeTotals.revenue)}</div>
-                      <div className="active-shift-label">OMZET SEMENTARA</div>
-                      <div className="mini-stats"><span><b>{number(activeTotals.items)}</b> item</span><span><b>{number(activeTotals.count)}</b> transaksi</span></div>
-                    </div>
-                    <Button variant="outline" className="full-width" onClick={() => navTo('sales')}>Buka detail penjualan <ArrowRight size={15} /></Button>
-                  </>
-                ) : lastShift ? (
-                  <>
-                    <div className="active-shift-card">
-                      <div className="active-shift-date"><CalendarDays size={16} /> {formatDate(lastShift.date)}</div>
-                      <div className="active-shift-time"><Clock3 size={15} /> {formatTime(lastShift.startAt)} – {lastShift.endAt ? formatTime(lastShift.endAt) : 'Belum selesai'} <span>·</span> {lastShift.keeper}</div>
-                      <div className="active-shift-total">{money(shiftTotals(lastShift).revenue)}</div>
-                      <div className="active-shift-label">OMZET SHIFT TERAKHIR</div>
-                      <div className="mini-stats"><span><b>{number(shiftTotals(lastShift).items)}</b> item</span><span><b>{number(shiftTotals(lastShift).count)}</b> transaksi</span></div>
-                    </div>
-                    <div className="home-shift-actions"><Button variant="outline" className="full-width" onClick={() => openShiftDetail(lastShift.id)}>Lihat detail shift <ArrowRight size={15} /></Button><Button variant="ghost" onClick={openStartDialog}>Mulai baru <Plus size={14} /></Button></div>
-                  </>
-                ) : (
-                  <EmptyState icon={Clock3} title="Belum ada shift aktif" description="Mulai penjagaan untuk membuat catatan penjualan baru." action={<Button variant="outline" onClick={openStartDialog}>Mulai shift <Plus size={15} /></Button>} />
-                )}
-              </section>
-              <section className="surface-panel recent-panel">
-                <SectionHeading eyebrow="LATEST ACTIVITY" title="Aktivitas terbaru" action={<button className="text-action" onClick={() => navTo('history')}>Lihat semua <ArrowUpRight size={14} /></button>} />
-                {recentTransactions.length ? (
-                  <div className="transaction-list compact-list">
-                    {recentTransactions.map((tx) => (
-                      <button className="recent-row" key={tx.id} onClick={() => openShiftDetail(tx.shiftId)}>
-                        <span className="recent-icon"><ShoppingBag size={15} /></span>
-                        <span className="recent-copy"><b>{tx.product}</b><small>{formatDate(tx.shiftDate, { day: 'numeric', month: 'short' })} · {number(tx.quantity)} item</small></span>
-                        <strong>{money(Number(tx.quantity) * Number(tx.unitPrice))}</strong>
-                      </button>
-                    ))}
-                  </div>
-                ) : (
-                  <EmptyState icon={Activity} title="Belum ada aktivitas" description="Produk yang kamu catat akan muncul di sini." />
-                )}
-              </section>
-            </div>
-            <section className="private-note"><ShieldCheck size={16} /><span><b>Ruang catatan pribadi.</b> Data WarungBoim tersimpan di browser perangkat ini dan tidak dikirim ke server.</span></section>
+            <p className="private-note"><ShieldCheck size={14} /> Data tersimpan di browser perangkat ini. Backup secara berkala.</p>
           </>
         )}
 
         {page === 'sales' && (
           <>
             <section className="page-intro">
-              <div><div className="eyebrow">SALES JOURNAL</div><h1>Catat <span>penjualan.</span></h1><p>Input cepat setiap produk yang terjual selama kamu menjaga warung.</p></div>
+              <div><div className="eyebrow">INPUT PENJUALAN</div><h1>Catat <span>barang terjual.</span></h1><p>Isi produk, jumlah, dan harga. Total dihitung otomatis.</p></div>
               {activeShift && <span className="live-badge"><span /> SHIFT AKTIF</span>}
             </section>
             {activeShift ? (
@@ -743,11 +726,20 @@ function App() {
                   <section className="surface-panel add-sale-panel">
                     <SectionHeading eyebrow="NEW ENTRY" title="Tambah penjualan" />
                     <form className="sale-form" onSubmit={quickSaveTransaction}>
-                      <div className="field-group field-product"><label htmlFor="quick-product">Nama produk</label><input id="quick-product" placeholder="Contoh: Indomie Goreng" value={txForm.product} onChange={(event) => setTxForm((current) => ({ ...current, product: event.target.value }))} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); setTxDialog({ mode: 'create', shiftId: activeShift.id, txId: null }) } }} /></div>
+                      <div className="field-group field-product"><label htmlFor="quick-product">Nama produk</label><input id="quick-product" autoFocus placeholder="Nama produk, mis. Indomie Goreng" value={txForm.product} onChange={(event) => setTxForm((current) => ({ ...current, product: event.target.value }))}  /></div>
                       <div className="field-row">
-                        <div className="field-group"><label htmlFor="quick-qty">Jumlah</label><div className="number-input"><button type="button" onClick={() => setTxForm((current) => ({ ...current, quantity: String(Math.max(1, Number(current.quantity || 1) - 1)) }))}><Minus size={14} /></button><input id="quick-qty" type="number" min="1" step="1" value={txForm.quantity} onChange={(event) => setTxForm((current) => ({ ...current, quantity: event.target.value }))} /><button type="button" onClick={() => setTxForm((current) => ({ ...current, quantity: String(Math.max(1, Number(current.quantity || 0) + 1)) }))}><Plus size={14} /></button></div></div>
+                        <div className="field-group"><label htmlFor="quick-qty">Jumlah</label><div className="number-input"><button type="button" onClick={() => setTxForm((current) => ({ ...current, quantity: String(Math.max(1, Number(current.quantity || 1) - 1)) }))}><Minus size={14} /></button><input id="quick-qty" inputMode="numeric" type="number" min="1" step="1" value={txForm.quantity} onChange={(event) => setTxForm((current) => ({ ...current, quantity: event.target.value }))} /><button type="button" onClick={() => setTxForm((current) => ({ ...current, quantity: String(Math.max(1, Number(current.quantity || 0) + 1)) }))}><Plus size={14} /></button></div></div>
                         <div className="field-group"><label htmlFor="quick-price">Harga satuan</label><div className="currency-input"><span>Rp</span><input id="quick-price" inputMode="numeric" type="number" min="0" step="100" placeholder="3.500" value={txForm.unitPrice} onChange={(event) => setTxForm((current) => ({ ...current, unitPrice: event.target.value }))} /></div></div>
                       </div>
+                      <div className="field-group payment-field">
+                        <label>Status pembayaran</label>
+                        <div className="payment-choice" role="group" aria-label="Status pembayaran">
+                          <button type="button" className={txForm.paymentStatus === 'paid' ? 'selected' : ''} onClick={() => setTxForm((current) => ({ ...current, paymentStatus: 'paid', customerName: '' }))}><CheckCircle2 size={15} /> Bayar langsung</button>
+                          <button type="button" className={txForm.paymentStatus === 'debt' ? 'selected debt-selected' : ''} onClick={() => setTxForm((current) => ({ ...current, paymentStatus: 'debt' }))}><Clock3 size={15} /> Utang</button>
+                        </div>
+                      </div>
+                      {txForm.paymentStatus === 'debt' && <div className="field-group"><label htmlFor="quick-customer">Nama pelanggan yang berutang</label><input id="quick-customer" placeholder="Nama pelanggan" value={txForm.customerName} onChange={(event) => setTxForm((current) => ({ ...current, customerName: event.target.value }))} required /></div>}
+                      <div className="field-group"><label htmlFor="quick-note">Catatan <span className="optional-label">Opsional</span></label><input id="quick-note" placeholder="Contoh: titip bayar sore / ambil besok" value={txForm.note} onChange={(event) => setTxForm((current) => ({ ...current, note: event.target.value }))} /></div>
                       <div className="subtotal-strip"><div><small>SUBTOTAL OTOMATIS</small><strong>{money((Number(txForm.quantity) || 0) * (Number(txForm.unitPrice) || 0))}</strong></div><Button variant="primary" type="submit">Simpan penjualan <ArrowRight size={16} /></Button></div>
                     </form>
                     <div className="form-footnote"><ShieldCheck size={14} /> Nama produk bebas diketik. Tidak perlu membuat katalog terlebih dahulu.</div>
@@ -772,6 +764,8 @@ function App() {
                     <div className="summary-total-label">TOTAL OMZET SEMENTARA</div>
                     <div className="summary-total">{money(activeTotals.revenue)}</div>
                     <div className="summary-divider" />
+                    <div className="summary-detail"><span>Uang diterima</span><b className="paid-amount">{money(activePaid)}</b></div>
+                    <div className="summary-detail"><span>Belum dibayar / utang</span><b className="debt-amount">{money(activeDebt)}</b></div>
                     <div className="summary-detail"><span>Total barang</span><b>{number(activeTotals.items)} item</b></div>
                     <div className="summary-detail"><span>Jumlah transaksi</span><b>{number(activeTotals.count)}</b></div>
                     <div className="summary-detail"><span>Mulai pukul</span><b>{formatTime(activeShift.startAt)}</b></div>
@@ -836,7 +830,8 @@ function App() {
                 <div><span className="eyebrow">{reportTitle.toUpperCase()} · TOTAL OMZET</span><strong>{money(reportTotals.revenue)}</strong><small>{reportShifts.length} shift tercatat pada periode ini</small></div>
                 <div className="report-total-mark"><TrendingUp size={24} /></div>
               </div>
-              <div className="report-stats-row"><div><span>Total barang</span><b>{number(reportTotals.items)} <small>item</small></b></div><div><span>Jumlah transaksi</span><b>{number(reportTotals.count)}</b></div><div><span>Shift penjagaan</span><b>{number(reportShifts.length)}</b></div></div>
+              <div className="report-stats-row"><div><span>Uang diterima</span><b className="paid-amount">{money(reportPaid)}</b></div><div><span>Masih utang</span><b className="debt-amount">{money(reportDebt)}</b></div><div><span>Total barang</span><b>{number(reportTotals.items)} <small>item</small></b></div></div>
+              <div className="report-payment-note"><span>{number(reportTotals.count)} transaksi · {number(reportShifts.length)} shift</span><span>Omzet = lunas + utang</span></div>
               <div className="report-content-grid">
                 <div className="report-detail-section"><SectionHeading eyebrow="PRODUCT PERFORMANCE" title="Produk terlaris" />
                   {productSummary.length ? <div className="product-ranking">{productSummary.slice(0, 6).map((product, index) => <div className="ranking-row" key={product.name.toLowerCase()}><span className="ranking-number">{String(index + 1).padStart(2, '0')}</span><div className="ranking-main"><b>{product.name}</b><small>{number(product.transactions)} transaksi</small></div><div className="ranking-right"><b>{number(product.quantity)} item</b><small>{money(product.revenue)}</small></div></div>)}</div> : <EmptyState icon={BarChart3} title="Belum ada data laporan" description="Transaksi di periode yang dipilih akan dirangkum di sini." />}
@@ -852,15 +847,25 @@ function App() {
               <h1>Laporan Penjualan Warung</h1>
               <p className="print-subtitle">Periode: {reportPeriod.start === reportPeriod.end ? formatDate(reportPeriod.start) : `${formatDate(reportPeriod.start)} — ${formatDate(reportPeriod.end)}`}</p>
               <div className="print-total"><span>TOTAL OMZET</span><strong>{money(reportTotals.revenue)}</strong></div>
-              <div className="print-metrics"><span>Total barang: <b>{number(reportTotals.items)} item</b></span><span>Transaksi: <b>{number(reportTotals.count)}</b></span><span>Jumlah shift: <b>{number(reportShifts.length)}</b></span></div>
-              {reportShifts.map((shift) => <div className="print-shift" key={shift.id}><h3>{formatDate(shift.date)} · {shift.keeper}</h3><p>{formatTime(shift.startAt)} – {shift.endAt ? formatTime(shift.endAt) : 'Masih aktif'}</p><table><thead><tr><th>Produk</th><th>Jumlah</th><th>Harga satuan</th><th>Subtotal</th></tr></thead><tbody>{shift.transactions.map((tx) => <tr key={tx.id}><td>{tx.product}</td><td>{tx.quantity}</td><td>{money(tx.unitPrice)}</td><td>{money(Number(tx.quantity) * Number(tx.unitPrice))}</td></tr>)}</tbody></table><div className="print-shift-total">Subtotal shift: {money(shiftTotals(shift).revenue)}</div></div>)}
-              <p className="print-footnote">Catatan: Laporan ini menghitung omzet penjualan, bukan keuntungan bersih.</p>
+              <div className="print-metrics">
+                <span>Uang diterima <b>{money(reportPaid)}</b></span>
+                <span>Belum dibayar / utang <b>{money(reportDebt)}</b></span>
+                <span>Total barang <b>{number(reportTotals.items)} item</b></span>
+                <span>Transaksi <b>{number(reportTotals.count)}</b></span>
+                <span>Jumlah shift <b>{number(reportShifts.length)}</b></span>
+              </div>
+              <div className="print-payment-legend">
+                <span><i className="print-dot paid-dot" /> Lunas — pembayaran sudah diterima</span>
+                <span><i className="print-dot debt-dot" /> Utang — pembayaran belum diterima</span>
+              </div>
+              {reportShifts.map((shift) => <div className="print-shift" key={shift.id}><h3>{formatDate(shift.date)} · {shift.keeper}</h3><p>{formatTime(shift.startAt)} – {shift.endAt ? formatTime(shift.endAt) : 'Masih aktif'}</p><table><thead><tr><th>Produk</th><th>Jumlah</th><th>Harga satuan</th><th>Subtotal</th><th>Pembayaran</th><th>Catatan</th></tr></thead><tbody>{shift.transactions.map((tx) => <tr key={tx.id}><td>{tx.product}{tx.paymentStatus === 'debt' && tx.customerName ? ` (${tx.customerName})` : ''}</td><td>{tx.quantity}</td><td>{money(tx.unitPrice)}</td><td>{money(Number(tx.quantity) * Number(tx.unitPrice))}</td><td>{(tx.paymentStatus || 'paid') === 'debt' ? 'Utang' : 'Lunas'}</td><td>{tx.note || '—'}</td></tr>)}</tbody></table><div className="print-shift-total">Subtotal shift: {money(shiftTotals(shift).revenue)} · Uang diterima: {money(shift.transactions.filter((tx) => (tx.paymentStatus || 'paid') === 'paid').reduce((sum, tx) => sum + Number(tx.quantity) * Number(tx.unitPrice), 0))} · Utang: {money(shift.transactions.filter((tx) => tx.paymentStatus === 'debt').reduce((sum, tx) => sum + Number(tx.quantity) * Number(tx.unitPrice), 0))}</div></div>)}
+              <p className="print-footnote">Catatan: Omzet mencakup transaksi lunas dan utang. Uang diterima hanya transaksi lunas. Omzet bukan keuntungan bersih.</p>
             </div>
           </>
         )}
       </main>
 
-      <footer className="app-footer"><span>© {new Date().getFullYear()} WarungBoim</span><span>PERSONAL · LOCAL ONLY · V 1.0</span></footer>
+      <footer className="app-footer"><span>© {new Date().getFullYear()} WarungFlow</span><span>PERSONAL · LOCAL ONLY · V 1.0</span></footer>
 
       <nav className="mobile-bottom-nav" aria-label="Navigasi mobile">
         {NAV_ITEMS.map(({ id, label, icon: Icon }) => <button key={id} onClick={() => navTo(id)} className={page === id ? 'active' : ''}><span><Icon size={19} strokeWidth={1.8} /></span><small>{label}</small></button>)}
@@ -879,6 +884,9 @@ function App() {
         <form className="modal-form" onSubmit={saveTransaction}>
           <div className="field-group"><label htmlFor="tx-product">Nama produk</label><input id="tx-product" autoFocus placeholder="Contoh: Indomie Goreng" value={txForm.product} onChange={(event) => setTxForm((current) => ({ ...current, product: event.target.value }))} required /></div>
           <div className="field-row"><div className="field-group"><label htmlFor="tx-quantity">Jumlah</label><input id="tx-quantity" type="number" min="1" step="1" value={txForm.quantity} onChange={(event) => setTxForm((current) => ({ ...current, quantity: event.target.value }))} required /></div><div className="field-group"><label htmlFor="tx-price">Harga satuan (Rp)</label><input id="tx-price" type="number" min="0" step="100" value={txForm.unitPrice} onChange={(event) => setTxForm((current) => ({ ...current, unitPrice: event.target.value }))} required /></div></div>
+          <div className="field-group payment-field"><label>Status pembayaran</label><div className="payment-choice" role="group" aria-label="Status pembayaran"><button type="button" className={txForm.paymentStatus === 'paid' ? 'selected' : ''} onClick={() => setTxForm((current) => ({ ...current, paymentStatus: 'paid', customerName: '' }))}><CheckCircle2 size={15} /> Bayar langsung</button><button type="button" className={txForm.paymentStatus === 'debt' ? 'selected debt-selected' : ''} onClick={() => setTxForm((current) => ({ ...current, paymentStatus: 'debt' }))}><Clock3 size={15} /> Utang</button></div></div>
+          {txForm.paymentStatus === 'debt' && <div className="field-group"><label htmlFor="tx-customer">Nama pelanggan yang berutang</label><input id="tx-customer" placeholder="Nama pelanggan" value={txForm.customerName} onChange={(event) => setTxForm((current) => ({ ...current, customerName: event.target.value }))} required /></div>}
+          <div className="field-group"><label htmlFor="tx-note">Catatan <span className="optional-label">Opsional</span></label><input id="tx-note" placeholder="Catatan tambahan" value={txForm.note} onChange={(event) => setTxForm((current) => ({ ...current, note: event.target.value }))} /></div>
           <div className="modal-subtotal"><span>Subtotal otomatis</span><strong>{money((Number(txForm.quantity) || 0) * (Number(txForm.unitPrice) || 0))}</strong></div>
           <div className="modal-actions"><Button variant="ghost" type="button" onClick={() => setTxDialog(null)}>Batal</Button><Button variant="primary" type="submit">{txDialog.mode === 'create' ? 'Simpan penjualan' : 'Simpan perubahan'} <Check size={15} /></Button></div>
         </form>

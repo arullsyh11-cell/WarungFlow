@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # WarungFlow — Personal Warung Sales Tracker
 
 Aplikasi pencatatan penjualan warung pribadi berbasis React, Vite, Tailwind CSS, dan LocalStorage.
@@ -50,7 +49,34 @@ Di halaman Laporan, pilih periode lalu klik **Export PDF**. Dialog cetak browser
 ## Catatan perhitungan
 
 WarungFlow menghitung omzet kotor dari `jumlah × harga satuan`. Aplikasi tidak menghitung modal, biaya, atau keuntungan bersih.
-=======
-# warungflow
-Personal Warung Sales Tracker — React, Vite &amp; LocalStorage
->>>>>>> 7f001d80664f5d514e10445a764b71d28d2a984f
+
+
+## PWA / Installasi
+
+WarungFlow sudah dilengkapi Web App Manifest, ikon aplikasi, dan service worker.
+Setelah deploy HTTPS selesai, buka situs melalui Chrome Android, lalu gunakan
+menu **Install app** atau **Add to Home screen**. Jika sebelumnya pernah dibuka,
+tutup tab lama dan refresh situs setelah deployment terbaru aktif.
+
+
+## Optimasi penggunaan harian
+
+- Aplikasi langsung membuka halaman input penjualan saat dibuka.
+- Jika belum ada shift aktif, halaman input menampilkan tombol mulai jaga.
+- Dashboard diringkas untuk menonjolkan omzet hari ini, status shift, dan transaksi terbaru.
+- Di layar HP, form input ditampilkan sebelum ringkasan shift agar pencatatan lebih cepat.
+
+
+## Kategori pembayaran & catatan transaksi
+
+Setiap transaksi mendukung status pembayaran **Lunas** atau **Utang**.
+Transaksi utang mewajibkan nama pelanggan, sedangkan catatan tambahan bersifat opsional.
+Laporan dan export CSV/PDF memisahkan omzet, uang yang diterima, dan nilai yang masih menjadi utang.
+Transaksi lama tanpa status pembayaran tetap dibaca sebagai **Lunas** agar data LocalStorage sebelumnya kompatibel.
+
+
+## PDF export
+
+Tombol Export PDF membuka dialog cetak browser. Pilih **Save as PDF / Simpan sebagai PDF**.
+Template cetak menggunakan layout A4 putih, ringkasan omzet, uang diterima, utang, jumlah barang,
+rincian per shift, status pembayaran (Lunas/Utang), nama pelanggan yang berutang, dan catatan transaksi.
