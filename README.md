@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # WarungFlow — Personal Warung Sales Tracker
 
 Aplikasi pencatatan penjualan warung pribadi berbasis React, Vite, Tailwind CSS, dan LocalStorage.
@@ -49,3 +50,7 @@ Di halaman Laporan, pilih periode lalu klik **Export PDF**. Dialog cetak browser
 ## Catatan perhitungan
 
 WarungFlow menghitung omzet kotor dari `jumlah × harga satuan`. Aplikasi tidak menghitung modal, biaya, atau keuntungan bersih.
+=======
+# warungflow
+Personal Warung Sales Tracker — React, Vite &amp; LocalStorage
+>>>>>>> 7f001d80664f5d514e10445a764b71d28d2a984f
